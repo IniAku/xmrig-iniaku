@@ -1,0 +1,23 @@
+{
+    "autosave": false,
+    "donate-level": 0,
+    "region": "auto",
+    "cpu": {
+        "enabled": true,
+        "huge-pages": true,
+        "max-threads-hint": 100
+    },
+    "randomx": {
+        "init": -1,
+        "mode": "auto",
+        "1gb-pages": false
+    },
+    "pools": [
+        {
+            "user": "YOUR_EPIC_ADDRESS.worker1",
+            "pass": "x"
+        }
+    ],
+    "print-time": 60,
+    "colors": true
+}

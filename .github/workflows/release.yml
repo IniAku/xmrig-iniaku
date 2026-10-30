@@ -1,0 +1,104 @@
+# Build & release XMRig epic.iniaku.my.id edition.
+# - push / PR      : build Linux + Windows, packages as artifacts
+# - push tag v*    : same, then packages are published as a GitHub Release
+#                    (tags containing "beta" are marked pre-release)
+name: release
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Version
+        id: v
+        run: echo "version=$(iniaku/version.sh)" >> "$GITHUB_OUTPUT"
+      # Ubuntu 20.04 (glibc 2.31) so the binary runs on HiveOS and Ubuntu 20.04+
+      - name: Build (Ubuntu 20.04 container) & package
+        run: |
+          if ! ./iniaku/build-linux-release.sh "${{ steps.v.outputs.version }}" > build.log 2>&1; then
+            cat build.log
+            # Job logs need a login; errors are also reported as an annotation.
+            msg=$( (grep -nE "error|fatal|not found|denied" build.log | head -25; echo ----; tail -60 build.log) | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=linux build failed::$msg"
+            exit 1
+          fi
+          cat build.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Version
+        id: v
+        shell: bash
+        run: echo "version=$(iniaku/version.sh)" >> "$GITHUB_OUTPUT"
+      - name: Dependencies (xmrig-deps)
+        shell: bash
+        run: git clone --depth 1 https://github.com/xmrig/xmrig-deps.git ../xmrig-deps
+      - name: Build
+        shell: bash
+        run: |
+          mkdir build && cd build
+          build() {
+            if ! "$@" > build.log 2>&1; then
+              cat build.log
+              msg=$( (grep -nE "error|fatal" build.log | grep -v "warning" | head -25; echo ----; tail -60 build.log) | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+              echo "::error title=build failed::$msg"
+              exit 1
+            fi
+            cat build.log
+          }
+          build cmake .. -G "Visual Studio 17 2022" -A x64 -DXMRIG_DEPS="$(cd ../../xmrig-deps/msvc2022/x64 && pwd -W)" -DWITH_OPENCL=OFF -DWITH_CUDA=OFF
+          build cmake --build . --config Release -- /m
+      - name: Package
+        shell: bash
+        run: iniaku/package.sh windows "${{ steps.v.outputs.version }}" build/Release/xmrig.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/*.zip
+            dist/*.sha256
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+          prerelease: ${{ contains(github.ref_name, 'beta') }}
+          body: |
+            XMRig epic.iniaku.my.id edition — Epic Cash RandomX (rx/epic), native Epic stratum.
+            Mines only to the epic.iniaku.my.id pool (region auto / id / us / au). No donation.
+
+            - Linux x64: glibc 2.31+ (HiveOS, Ubuntu 20.04+)
+            - Windows x64
+
+            Set your address in config.json: "user": "<address>.<worker>" (or -u). See README.txt.

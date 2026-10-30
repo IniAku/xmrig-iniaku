@@ -15,6 +15,19 @@
  *   along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+// winsock2.h before anything that may include windows.h
+#ifdef _WIN32
+#   include <winsock2.h>
+#   include <ws2tcpip.h>
+#else
+#   include <fcntl.h>
+#   include <netdb.h>
+#   include <sys/select.h>
+#   include <sys/socket.h>
+#   include <unistd.h>
+#endif
+
+
 #include "base/net/stratum/IniakuPools.h"
 #include "3rdparty/rapidjson/document.h"
 #include "base/io/json/Json.h"
@@ -29,16 +42,6 @@
 #include <string>
 
 
-#ifdef _WIN32
-#   include <winsock2.h>
-#   include <ws2tcpip.h>
-#else
-#   include <fcntl.h>
-#   include <netdb.h>
-#   include <sys/select.h>
-#   include <sys/socket.h>
-#   include <unistd.h>
-#endif
 
 
 namespace xmrig {

@@ -4,3 +4,7 @@ scripts/deps
 /CMakeLists.txt.user
 /.idea
 /src/backend/opencl/cl/cn/cryptonight_gen.cl
+dist/
+build-u2004/
+scripts/deps/
+scripts/build/
