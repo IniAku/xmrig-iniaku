@@ -212,6 +212,9 @@ void xmrig::BaseTransform::transform(rapidjson::Document &doc, int key, const ch
     case IConfig::UserAgentKey: /* --user-agent */
         return set(doc, BaseConfig::kUserAgent, arg);
 
+    case IConfig::RegionKey: /* --region */
+        return set(doc, "region", arg);
+
     case IConfig::TitleKey: /* --title */
         return set(doc, BaseConfig::kTitle, arg);
 

@@ -78,6 +78,12 @@ bool xmrig::Job::setBlob(const char *blob)
         return false;
     }
 
+    // rx/epic: nonce 8 byte di AKHIR blob (pre_pow Epic + nonce), bukan offset 39 Monero.
+    if (algorithm() == Algorithm::RX_EPIC) {
+        m_size = size;
+        return true;
+    }
+
     if (readUnaligned(nonce()) != 0 && !m_nicehash) {
         m_nicehash = true;
     }
@@ -167,6 +173,10 @@ size_t xmrig::Job::nonceOffset() const
 
     if (algorithm() == Algorithm::RX_YADA) {
         return 147;
+    }
+
+    if (algorithm() == Algorithm::RX_EPIC) {
+        return m_size >= 8 ? m_size - 8 : 0;
     }
 
     return 39;

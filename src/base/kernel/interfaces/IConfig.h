@@ -55,6 +55,7 @@ public:
         SyslogKey            = 'S',
         UrlKey               = 'o',
         UserAgentKey         = 1008,
+        RegionKey            = 1998, // epic.iniaku.my.id: --region auto|id|us|au
         UserKey              = 'u',
         UserpassKey          = 'O',
         ProxyKey             = 'x',

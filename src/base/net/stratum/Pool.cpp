@@ -35,6 +35,9 @@
 #   include "base/net/stratum/AutoClient.h"
 #   include "base/net/stratum/EthStratumClient.h"
 #endif
+#ifdef XMRIG_ALGO_RANDOMX
+#   include "base/net/stratum/EpicClient.h"
+#endif
 
 
 #ifdef XMRIG_FEATURE_HTTP
@@ -226,6 +229,13 @@ xmrig::IClient *xmrig::Pool::createClient(int id, IClientListener *listener) con
     IClient *client = nullptr;
 
     if (m_mode == MODE_POOL) {
+#       ifdef XMRIG_ALGO_RANDOMX
+        if (m_algorithm == Algorithm::RX_EPIC) {
+            client = new EpicClient(id, Platform::userAgent(), listener);
+        }
+#       endif
+
+        if (!client) {
 #       if defined XMRIG_ALGO_KAWPOW || defined XMRIG_ALGO_GHOSTRIDER
         const uint32_t f = m_algorithm.family();
         if ((f == Algorithm::KAWPOW) || (f == Algorithm::GHOSTRIDER) || (m_coin == Coin::RAVEN)) {
@@ -235,6 +245,7 @@ xmrig::IClient *xmrig::Pool::createClient(int id, IClientListener *listener) con
 #       endif
         {
             client = new Client(id, Platform::userAgent(), listener);
+        }
         }
     }
 #   ifdef XMRIG_FEATURE_HTTP

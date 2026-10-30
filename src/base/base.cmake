@@ -259,6 +259,13 @@ if (WITH_KAWPOW OR WITH_GHOSTRIDER)
 endif()
 
 
+# Epic Cash native stratum (rx/epic)
+if (WITH_RANDOMX)
+    list(APPEND HEADERS_BASE src/base/net/stratum/EpicClient.h src/base/net/stratum/IniakuPools.h)
+    list(APPEND SOURCES_BASE src/base/net/stratum/EpicClient.cpp src/base/net/stratum/IniakuPools.cpp)
+endif()
+
+
 if (WITH_RANDOMX AND WITH_BENCHMARK)
     add_definitions(/DXMRIG_FEATURE_BENCHMARK)
 

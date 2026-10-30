@@ -17,6 +17,8 @@
  */
 
 #include <cassert>
+#include <cstring>
+#include <random>
 #include <thread>
 #include <mutex>
 
@@ -237,6 +239,48 @@ void xmrig::CpuWorker<N>::hashrateData(uint64_t &hashCount, uint64_t &, uint64_t
 }
 
 
+namespace xmrig {
+
+#ifdef XMRIG_ALGO_RANDOMX
+// (2^256 - 1) / diff sbg 32 byte big-endian: pembagian biner per bit (portabel, tanpa
+// __int128 yg tidak ada di MSVC); dihitung sekali per job.
+static void epicBoundary(uint64_t diff, uint8_t out[32])
+{
+    if (diff == 0) {
+        diff = 1;
+    }
+
+    memset(out, 0, 32);
+    uint64_t rem = 0;
+    for (int bit = 0; bit < 256; ++bit) {
+        const uint64_t carry = rem >> 63;
+        rem = (rem << 1) | 1; // pembilang semua bit 1
+        if (carry || rem >= diff) {
+            rem -= diff;
+            out[bit / 8] |= static_cast<uint8_t>(0x80 >> (bit % 8));
+        }
+    }
+}
+
+
+static inline void epicWriteNonce(uint8_t *blob, size_t size, uint64_t nonce)
+{
+    for (int i = 0; i < 8; ++i) {
+        blob[size - 8 + i] = static_cast<uint8_t>(nonce >> (56 - 8 * i));
+    }
+}
+
+
+static uint64_t epicRandomNonce()
+{
+    static thread_local std::mt19937_64 rng(std::random_device{}() ^ (static_cast<uint64_t>(Chrono::highResolutionMSecs()) << 20));
+    return rng();
+}
+#endif
+
+} // namespace xmrig
+
+
 template<size_t N>
 void xmrig::CpuWorker<N>::start()
 {
@@ -289,6 +333,40 @@ void xmrig::CpuWorker<N>::start()
             uint8_t miner_signature_saved[64];
 
 #           ifdef XMRIG_ALGO_RANDOMX
+            // rx/epic: nonce u64 big-endian di 8 byte terakhir blob, dikelola worker sendiri
+            // (bukan slot nonce 32-bit xmrig); share bila hash (BE) <= (2^256-1)/diff.
+            if (job.algorithm() == Algorithm::RX_EPIC && N == 1) {
+                const size_t size = job.size();
+                if (first) {
+                    first = false;
+                    memcpy(m_epicBlob, job.blob(), size);
+                    epicBoundary(job.diff(), m_epicBoundary);
+                    m_epicNonce = epicRandomNonce();
+                    epicWriteNonce(m_epicBlob, size, m_epicNonce);
+                    randomx_calculate_hash_first(m_vm, tempHash, m_epicBlob, size);
+                }
+
+                if (!nextRound()) {
+                    break;
+                }
+
+                const uint64_t hashed = m_epicNonce++;
+                epicWriteNonce(m_epicBlob, size, m_epicNonce);
+                randomx_calculate_hash_next(m_vm, tempHash, m_epicBlob, size, m_hash);
+
+                if (memcmp(m_hash, m_epicBoundary, 32) <= 0) {
+                    JobResults::submit(JobResult(job, hashed, m_hash));
+                }
+
+                m_count += 1;
+
+                if (m_yield) {
+                    std::this_thread::yield();
+                }
+
+                continue;
+            }
+
             uint8_t* miner_signature_ptr = m_job.blob() + m_job.nonceOffset() + m_job.nonceSize();
             if (job.algorithm().family() == Algorithm::RANDOM_X) {
                 if (first) {

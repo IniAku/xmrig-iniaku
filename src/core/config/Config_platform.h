@@ -79,6 +79,7 @@ static const option options[] = {
     { "url",                   1, nullptr, IConfig::UrlKey                },
     { "user",                  1, nullptr, IConfig::UserKey               },
     { "user-agent",            1, nullptr, IConfig::UserAgentKey          },
+    { "region",                1, nullptr, IConfig::RegionKey             },
     { "userpass",              1, nullptr, IConfig::UserpassKey           },
     { "rig-id",                1, nullptr, IConfig::RigIdKey              },
     { "no-cpu",                0, nullptr, IConfig::CPUKey                },

@@ -24,6 +24,7 @@
 
 
 #include "base/net/stratum/Pools.h"
+#include "base/net/stratum/IniakuPools.h"
 #include "3rdparty/rapidjson/document.h"
 #include "base/io/log/Log.h"
 #include "base/kernel/interfaces/IJsonReader.h"
@@ -143,20 +144,21 @@ void xmrig::Pools::load(const IJsonReader &reader)
 #   endif
 
     const rapidjson::Value &pools = reader.getArray(kPools);
-    if (!pools.IsArray()) {
-        return;
+
+    if (pools.IsArray()) {
+        for (const rapidjson::Value &value : pools.GetArray()) {
+            if (!value.IsObject()) {
+                continue;
+            }
+
+            Pool pool(value);
+            if (pool.isValid()) {
+                m_data.push_back(std::move(pool));
+            }
+        }
     }
 
-    for (const rapidjson::Value &value : pools.GetArray()) {
-        if (!value.IsObject()) {
-            continue;
-        }
-
-        Pool pool(value);
-        if (pool.isValid()) {
-            m_data.push_back(std::move(pool));
-        }
-    }
+    applyIniakuPools(m_data, pools, reader.getString("region", "auto"));
 
     setDonateLevel(reader.getInt(kDonateLevel, kDefaultDonateLevel));
     setProxyDonate(reader.getInt(kDonateOverProxy, PROXY_DONATE_AUTO));

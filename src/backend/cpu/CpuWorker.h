@@ -97,6 +97,12 @@ private:
 
 #   ifdef XMRIG_ALGO_RANDOMX
     randomx_vm *m_vm        = nullptr;
+
+    // rx/epic: salinan blob (pre_pow + nonce u64 big-endian di akhir), nonce 64-bit worker
+    // & batas hash big-endian (2^256-1)/diff — Epic membandingkan hash sbg bilangan BE.
+    alignas(16) uint8_t m_epicBlob[Job::kMaxBlobSize]{ 0 };
+    uint8_t m_epicBoundary[32]{ 0 };
+    uint64_t m_epicNonce    = 0;
     Buffer m_seed;
 #   endif
 

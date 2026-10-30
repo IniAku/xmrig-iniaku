@@ -107,6 +107,55 @@ RandomX_ConfigurationYada::RandomX_ConfigurationYada()
 	ArgonIterations = 4;
 }
 
+// Epic Cash: parameter fork RandomX milik EpicCash (github.com/EpicCash/randomx,
+// src/configuration.h & src/aes_hash.cpp) — versi lama RandomX dgn frekuensi instruksi
+// sendiri & 4 kunci AES generator (kunci 4..7 = 0..3).
+RandomX_ConfigurationEpic::RandomX_ConfigurationEpic()
+{
+	ArgonSalt = "RandomX\x03";
+
+	RANDOMX_FREQ_IADD_RS  = 25;
+	RANDOMX_FREQ_IADD_M   = 7;
+	RANDOMX_FREQ_ISUB_R   = 16;
+	RANDOMX_FREQ_ISUB_M   = 7;
+	RANDOMX_FREQ_IMUL_R   = 16;
+	RANDOMX_FREQ_IMUL_M   = 4;
+	RANDOMX_FREQ_IMULH_R  = 4;
+	RANDOMX_FREQ_IMULH_M  = 1;
+	RANDOMX_FREQ_ISMULH_R = 4;
+	RANDOMX_FREQ_ISMULH_M = 1;
+	RANDOMX_FREQ_IMUL_RCP = 8;
+	RANDOMX_FREQ_INEG_R   = 2;
+	RANDOMX_FREQ_IXOR_R   = 15;
+	RANDOMX_FREQ_IXOR_M   = 5;
+	RANDOMX_FREQ_IROR_R   = 10;
+	RANDOMX_FREQ_IROL_R   = 0;
+	RANDOMX_FREQ_ISWAP_R  = 4;
+	RANDOMX_FREQ_FSWAP_R  = 8;
+	RANDOMX_FREQ_FADD_R   = 20;
+	RANDOMX_FREQ_FADD_M   = 5;
+	RANDOMX_FREQ_FSUB_R   = 20;
+	RANDOMX_FREQ_FSUB_M   = 5;
+	RANDOMX_FREQ_FSCAL_R  = 6;
+	RANDOMX_FREQ_FMUL_R   = 20;
+	RANDOMX_FREQ_FDIV_M   = 4;
+	RANDOMX_FREQ_FSQRT_R  = 6;
+	RANDOMX_FREQ_CBRANCH  = 16;
+	RANDOMX_FREQ_CFROUND  = 1;
+	RANDOMX_FREQ_ISTORE   = 16;
+	RANDOMX_FREQ_NOP      = 0;
+
+	// AES_GEN_4R_KEY0..3 EpicCash/randomx
+	fillAes4Rx4_Key[0] = rx_set_int_vec_i128(0xcf359e95, 0x141f82b7, 0x7ffbe4a6, 0xf890465d);
+	fillAes4Rx4_Key[1] = rx_set_int_vec_i128(0x6741ffdc, 0xbd5c5ac3, 0xfee8278a, 0x6a55c450);
+	fillAes4Rx4_Key[2] = rx_set_int_vec_i128(0x3d324aac, 0xa7279ad2, 0xd524fde4, 0x114c47a4);
+	fillAes4Rx4_Key[3] = rx_set_int_vec_i128(0x76f6db08, 0x42d3dbd9, 0x99a9aeff, 0x810c3a2a);
+	fillAes4Rx4_Key[4] = fillAes4Rx4_Key[0];
+	fillAes4Rx4_Key[5] = fillAes4Rx4_Key[1];
+	fillAes4Rx4_Key[6] = fillAes4Rx4_Key[2];
+	fillAes4Rx4_Key[7] = fillAes4Rx4_Key[3];
+}
+
 RandomX_ConfigurationBase::RandomX_ConfigurationBase()
 	: ArgonIterations(3)
 	, ArgonLanes(1)
@@ -359,6 +408,7 @@ RandomX_ConfigurationArqma RandomX_ArqmaConfig;
 RandomX_ConfigurationGraft RandomX_GraftConfig;
 RandomX_ConfigurationSafex RandomX_SafexConfig;
 RandomX_ConfigurationYada RandomX_YadaConfig;
+RandomX_ConfigurationEpic RandomX_EpicConfig;
 
 alignas(64) RandomX_ConfigurationBase RandomX_CurrentConfig;
 
