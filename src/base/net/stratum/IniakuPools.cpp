@@ -159,6 +159,19 @@ void applyIniakuPools(std::vector<Pool> &pools, const rapidjson::Value &config, 
         }
     }
 
+    // Tanpa alamat wallet jangan pasang pool: xmrig mencari config bertahap (CLI, config.json,
+    // ...) dan berhenti di tahap pertama yg punya pool valid — kalau pool selalu dipasang,
+    // config.json tidak pernah dibaca & login terkirim kosong. Placeholder dianggap kosong.
+    if (user.empty() || user.rfind("YOUR_", 0) == 0) {
+        static bool warned = false;
+        if (!user.empty() && !warned) {
+            warned = true;
+            LOG_ERR("set your Epic address in config.json: \"user\": \"<address>.<worker>\" (now \"%s\")", user.c_str());
+        }
+        pools.clear();
+        return;
+    }
+
     if (!region || !isIniakuRegion(region)) {
         LOG_ERR("unknown region \"%s\", using auto (valid: auto, id, us, au)", region ? region : "");
         region = "auto";
