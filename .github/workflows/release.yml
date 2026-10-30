@@ -70,6 +70,21 @@ jobs:
           }
           build cmake .. -G "Visual Studio 17 2022" -A x64 -DXMRIG_DEPS="$(cd ../../xmrig-deps/msvc2022/x64 && pwd -W)" -DWITH_OPENCL=OFF -DWITH_CUDA=OFF
           build cmake --build . --config Release --parallel
+      # Static MSVC runtime (/MT, cmake/flags.cmake): the exe must not need the
+      # VC++ 2015-2022 redistributable (vcruntime140.dll / msvcp140.dll).
+      - name: Check runtime dependencies
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $dumpbin = & $vswhere -latest -products * -find "**\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+          $deps = & $dumpbin /nologo /dependents build\Release\xmrig.exe | Select-String -Pattern "\.dll" | ForEach-Object { $_.Line.Trim() }
+          $list = ($deps -join ", ")
+          Write-Output "DLL imports: $list"
+          if ($deps -match "(?i)vcruntime|msvcp|ucrtbase|api-ms-win-crt") {
+            Write-Output "::error title=dynamic MSVC runtime::xmrig.exe imports $list"
+            exit 1
+          }
+          Write-Output "::notice title=xmrig.exe DLL imports::$list"
       - name: Package
         shell: bash
         run: iniaku/package.sh windows "${{ steps.v.outputs.version }}" build/Release/xmrig.exe
