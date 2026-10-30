@@ -69,7 +69,7 @@ jobs:
             cat build.log
           }
           build cmake .. -G "Visual Studio 17 2022" -A x64 -DXMRIG_DEPS="$(cd ../../xmrig-deps/msvc2022/x64 && pwd -W)" -DWITH_OPENCL=OFF -DWITH_CUDA=OFF
-          build cmake --build . --config Release -- /m
+          build cmake --build . --config Release --parallel
       - name: Package
         shell: bash
         run: iniaku/package.sh windows "${{ steps.v.outputs.version }}" build/Release/xmrig.exe
