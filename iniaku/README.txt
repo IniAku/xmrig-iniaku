@@ -14,6 +14,19 @@ Quick start
    Windows: start.cmd         (or xmrig.exe)
 3. Check your worker at https://epic.iniaku.my.id
 
+Windows: antivirus (Microsoft Defender)
+---------------------------------------
+Like every XMRig build, xmrig.exe is flagged as a "CoinMiner" by Defender and most
+antivirus programs and is deleted right after unpacking or starting. Before unpacking,
+add exclusions for the miner folder AND the miner process. In PowerShell as administrator
+(adjust the folder):
+    Add-MpPreference -ExclusionPath "C:\Miners\xmrig-iniaku"
+    Add-MpPreference -ExclusionProcess "C:\Miners\xmrig-iniaku\xmrig.exe"
+or: Windows Security -> Virus & threat protection -> Manage settings -> Exclusions ->
+Add an exclusion -> Folder (and Process: xmrig.exe).
+If the file was already removed: Windows Security -> Protection history -> Restore, or unpack
+the zip again after adding the exclusions.
+
 Region
 ------
 "region": "auto" (default) measures the connection time to id / us / au and uses the
@@ -21,13 +34,14 @@ closest server; if it goes down XMRig switches to the next one automatically.
 Force a region in config.json ("region": "us") or on the command line: --region us
 Valid values: auto, id, us, au. Pool URLs given with -o or in config.json are ignored.
 
-Faster mining: huge pages and MSR (administrator / root)
---------------------------------------------------------
-RandomX is 20-50% faster with huge pages and the MSR mod enabled. Both need elevated
-rights:
-  Windows: right-click start.cmd -> "Run as administrator" (the first run may ask for a
-           reboot so the "Lock pages in memory" right takes effect).
-  Linux:   run as root (sudo ./start.sh), or enable huge pages once:
+Faster mining: huge pages (administrator / root)
+-----------------------------------------------
+RandomX is noticeably faster with huge pages; Linux can additionally use the MSR mod.
+  Windows: right-click start.cmd -> "Run as administrator" once. XMRig grants the
+           "Lock pages in memory" right; after a reboot the log shows "huge pages 100%".
+           (The MSR mod is not available on Windows in this build: its WinRing0 driver
+           is blocked by Windows as a vulnerable driver and is not included.)
+  Linux:   run as root (sudo ./start.sh) for huge pages + MSR, or enable huge pages once:
            sudo sysctl -w vm.nr_hugepages=1280
 The miner also works without them, just slower ("huge pages 0%" in the log).
 
