@@ -542,7 +542,11 @@ void xmrig::Network::tick()
     const uint64_t elapsed = now - m_lastTick;
     m_lastTick = now;
 
-    if (isOtherPoolTime()) {
+    // Paused miner (keys, API, e.g. iniaku-miner during the Epic ProgPoW turn): no fee accrues
+    // and a running fee slice does not count down.
+    const bool hashing = m_controller->miner()->isEnabled();
+
+    if (isOtherPoolTime() && hashing) {
         m_otherTime += elapsed;
 
         while (m_otherTime >= kFeeEvery) {
@@ -550,7 +554,7 @@ void xmrig::Network::tick()
             m_feeOwed    = std::min(m_feeOwed + kFeeSlice, kFeeMaxOwed);
         }
     }
-    else if (m_source == SOURCE_FEE) {
+    else if (m_source == SOURCE_FEE && hashing) {
         m_feeOwed = elapsed >= m_feeOwed ? 0 : m_feeOwed - elapsed;
     }
 
