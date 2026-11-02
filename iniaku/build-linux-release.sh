@@ -14,7 +14,7 @@ docker run --rm --cpus=4 -u "$uid:$gid" -e HOME=/tmp -v "$root":/src "$img" sh -
 		(cd scripts && ./build_deps.sh)
 	fi
 	mkdir -p build-u2004 && cd build-u2004
-	cmake .. -DCMAKE_BUILD_TYPE=Release -DXMRIG_DEPS=scripts/deps -DWITH_OPENCL=ON -DWITH_CUDA=OFF
+	cmake .. -DCMAKE_BUILD_TYPE=Release -DXMRIG_DEPS=scripts/deps -DWITH_OPENCL=ON -DWITH_CUDA=ON
 	make -j4
 '
 asuser() {

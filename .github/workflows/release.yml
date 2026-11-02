@@ -72,7 +72,7 @@ jobs:
             fi
             cat build.log
           }
-          build cmake .. -G "Visual Studio 17 2022" -A x64 -DXMRIG_DEPS="$(cd ../../xmrig-deps/msvc2022/x64 && pwd -W)" -DWITH_OPENCL=ON -DWITH_CUDA=OFF
+          build cmake .. -G "Visual Studio 17 2022" -A x64 -DXMRIG_DEPS="$(cd ../../xmrig-deps/msvc2022/x64 && pwd -W)" -DWITH_OPENCL=ON -DWITH_CUDA=ON
           build cmake --build . --config Release --parallel
       # Static MSVC runtime (/MT, cmake/flags.cmake): the exe must not need the
       # VC++ 2015-2022 redistributable (vcruntime140.dll / msvcp140.dll).
