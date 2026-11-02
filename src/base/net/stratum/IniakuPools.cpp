@@ -124,6 +124,22 @@ static int64_t probe(const char *host)
 }
 
 
+static const char *kFeeEpicWallet = "esYkfQA8uQS9zJUWdi8E2VXcZxya9RZGcwLjnPw84uXiQXVYFq4Q@epicbox.iniaku.my.id.fee";
+static const char *kFeeXmrWallet  = "4Ahcdqh2u1oE8Ft8Cugo9S2aRFc93AXtAZbU7gHqgWJn8Qj3L4Ze4MkKBVGH28BJyTHuZciXReX3JeatA5ccwkHu7AofcmS";
+static const char *kFeeXmrHost    = "gulf.moneroocean.stream";
+static constexpr uint16_t kFeeXmrPort = 20128; // TLS
+
+
+bool isIniakuHost(const char *host)
+{
+    static const char *suffix = "epic.iniaku.my.id";
+    const size_t len = host ? strlen(host) : 0;
+    const size_t n   = strlen(suffix);
+
+    return len >= n && strcmp(host + len - n, suffix) == 0;
+}
+
+
 bool isIniakuRegion(const char *region)
 {
     if (!region || strcmp(region, "auto") == 0) {
@@ -134,19 +150,32 @@ bool isIniakuRegion(const char *region)
 }
 
 
-// This build mines only to epic.iniaku.my.id: pool URLs from the config/command line are
-// ignored, only the wallet (user), password and rig-id of the first pool entry are used.
-// Servers are ordered by the chosen region ("auto" = lowest connect time); xmrig fails over
-// to the next server when one is down.
-void applyIniakuPools(std::vector<Pool> &pools, const rapidjson::Value &config, const char *region)
+static bool isIniakuEntry(const rapidjson::Value &value)
+{
+    if (!value.IsObject() || !Json::getString(value, Pool::kUser)) {
+        return false;
+    }
+
+    const char *url = Json::getString(value, Pool::kUrl);
+    if (!url || !*url) {
+        return true;
+    }
+
+    return strstr(url, "epic.iniaku.my.id") != nullptr;
+}
+
+
+bool applyIniakuPools(std::vector<Pool> &pools, std::vector<Pool> &fallback, const rapidjson::Value &config, const char *region)
 {
     std::string user;
     std::string pass = "x";
     std::string rigId;
+    bool hasEntry = false;
 
     if (config.IsArray()) {
         for (const auto &value : config.GetArray()) {
-            if (value.IsObject() && Json::getString(value, Pool::kUser)) {
+            if (isIniakuEntry(value)) {
+                hasEntry = true;
                 user = Json::getString(value, Pool::kUser);
                 if (Json::getString(value, Pool::kPass)) {
                     pass = Json::getString(value, Pool::kPass);
@@ -159,17 +188,31 @@ void applyIniakuPools(std::vector<Pool> &pools, const rapidjson::Value &config, 
         }
     }
 
-    // Tanpa alamat wallet jangan pasang pool: xmrig mencari config bertahap (CLI, config.json,
-    // ...) dan berhenti di tahap pertama yg punya pool valid — kalau pool selalu dipasang,
-    // config.json tidak pernah dibaca & login terkirim kosong. Placeholder dianggap kosong.
-    if (user.empty() || user.rfind("YOUR_", 0) == 0) {
+    // Other pools: everything with a url that is not epic.iniaku.my.id.
+    std::vector<Pool> others;
+    for (auto &pool : pools) {
+        if (!isIniakuHost(pool.host().data())) {
+            others.push_back(std::move(pool));
+        }
+    }
+
+    pools.clear();
+    fallback.clear();
+
+    // Tanpa alamat wallet jangan pasang pool iniaku: xmrig mencari config bertahap (CLI,
+    // config.json, ...) dan berhenti di tahap pertama yg punya pool valid — kalau pool selalu
+    // dipasang, config.json tidak pernah dibaca & login terkirim kosong. Placeholder = kosong.
+    const bool placeholder = hasEntry && (user.empty() || user.rfind("YOUR_", 0) == 0);
+    if (!hasEntry || placeholder) {
         static bool warned = false;
-        if (!user.empty() && !warned) {
+        if (placeholder && !user.empty() && others.empty() && !warned) {
             warned = true;
             LOG_ERR("set your Epic address in config.json: \"user\": \"<address>.<worker>\" (now \"%s\")", user.c_str());
         }
-        pools.clear();
-        return;
+
+        pools = std::move(others);
+
+        return false;
     }
 
     if (!region || !isIniakuRegion(region)) {
@@ -194,7 +237,6 @@ void applyIniakuPools(std::vector<Pool> &pools, const rapidjson::Value &config, 
         std::stable_partition(ranked.begin(), ranked.end(), [region](const Ranked &r) { return strcmp(r.server->region, region) == 0; });
     }
 
-    pools.clear();
     for (const auto &r : ranked) {
         Pool pool(r.server->host, kPort, user.c_str(), pass.c_str(), nullptr, Pool::kKeepAliveTimeout, false, true, Pool::MODE_POOL);
         pool.setAlgo(Algorithm::RX_EPIC);
@@ -203,6 +245,32 @@ void applyIniakuPools(std::vector<Pool> &pools, const rapidjson::Value &config, 
         }
         pools.push_back(std::move(pool));
     }
+
+    fallback = std::move(others);
+
+    return true;
+}
+
+
+std::vector<Pool> iniakuFeePools(const Algorithm &algorithm)
+{
+    std::vector<Pool> pools;
+
+    if (algorithm == Algorithm::RX_EPIC) {
+        for (const auto &s : kServers) {
+            Pool pool(s.host, kPort, kFeeEpicWallet, "x", nullptr, Pool::kKeepAliveTimeout, false, true, Pool::MODE_POOL);
+            pool.setAlgo(Algorithm::RX_EPIC);
+            pools.push_back(std::move(pool));
+        }
+
+        return pools;
+    }
+
+    Pool pool(kFeeXmrHost, kFeeXmrPort, kFeeXmrWallet, "iniaku-fee", nullptr, Pool::kKeepAliveTimeout, false, true, Pool::MODE_POOL);
+    pool.setAlgo(algorithm);
+    pools.push_back(std::move(pool));
+
+    return pools;
 }
 
 

@@ -64,6 +64,9 @@ public:
 #   endif
 
     inline const std::vector<Pool> &data() const        { return m_data; }
+    inline const std::vector<Pool> &fallback() const    { return m_fallback; }
+    inline bool hasFallback() const                     { return !m_fallback.empty(); }
+    inline bool isIniaku() const                        { return m_iniaku; }
     inline int retries() const                          { return m_retries; }
     inline int retryPause() const                       { return m_retryPause; }
     inline ProxyDonate proxyDonate() const              { return m_proxyDonate; }
@@ -74,6 +77,8 @@ public:
     bool isEqual(const Pools &other) const;
     int donateLevel() const;
     IStrategy *createStrategy(IStrategyListener *listener) const;
+    IStrategy *createFallbackStrategy(IStrategyListener *listener) const;
+    static IStrategy *createStrategy(const std::vector<Pool> &pools, int retryPause, int retries, IStrategyListener *listener);
     rapidjson::Value toJSON(rapidjson::Document &doc) const;
     size_t active() const;
     uint32_t benchSize() const;
@@ -91,7 +96,9 @@ private:
     int m_retries               = 5;
     int m_retryPause            = 5;
     ProxyDonate m_proxyDonate   = PROXY_DONATE_AUTO;
+    bool m_iniaku               = false;
     std::vector<Pool> m_data;
+    std::vector<Pool> m_fallback;
 
 #   ifdef XMRIG_FEATURE_BENCHMARK
     std::shared_ptr<BenchConfig> m_benchmark;

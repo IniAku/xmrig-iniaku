@@ -30,8 +30,10 @@
 
 
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 
 namespace xmrig
@@ -46,7 +48,8 @@ class RxDataset;
 class RxQueueItem
 {
 public:
-    RxQueueItem(const RxSeed &seed, const std::vector<uint32_t> &nodeset, uint32_t threads, bool hugePages, bool oneGbPages, RxConfig::Mode mode, int priority) :
+    RxQueueItem(size_t slot, const RxSeed &seed, const std::vector<uint32_t> &nodeset, uint32_t threads, bool hugePages, bool oneGbPages, RxConfig::Mode mode, int priority) :
+        slot(slot),
         hugePages(hugePages),
         oneGbPages(oneGbPages),
         priority(priority),
@@ -56,13 +59,14 @@ public:
         threads(threads)
     {}
 
-    const bool hugePages;
-    const bool oneGbPages;
-    const int priority;
-    const RxConfig::Mode mode;
-    const RxSeed seed;
-    const std::vector<uint32_t> nodeset;
-    const uint32_t threads;
+    size_t slot;
+    bool hugePages;
+    bool oneGbPages;
+    int priority;
+    RxConfig::Mode mode;
+    RxSeed seed;
+    std::vector<uint32_t> nodeset;
+    uint32_t threads;
 };
 
 
@@ -89,13 +93,26 @@ private:
         STATE_SHUTDOWN
     };
 
+    // epic.iniaku.my.id: up to two datasets stay in memory (e.g. rx/epic for the pool turns and
+    // rx/0 for the fallback pool), so switching between them needs no dataset init.
+    struct Slot
+    {
+        IRxStorage *storage = nullptr;
+        RxSeed seed;
+        bool ready          = false;
+        uint64_t used       = 0;
+    };
+
+    static constexpr size_t kSlots = 2;
+
     template<typename T> bool isReadyUnsafe(const T &seed) const;
+    template<typename T> int findReady(const T &seed) const;
+    size_t chooseSlot(const RxSeed &seed) const;
     void backgroundInit();
     void onReady();
 
     IRxListener *m_listener = nullptr;
-    IRxStorage *m_storage   = nullptr;
-    RxSeed m_seed;
+    Slot m_slots[kSlots];
     State m_state = STATE_IDLE;
     std::condition_variable m_cv;
     std::mutex m_mutex;

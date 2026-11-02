@@ -45,6 +45,13 @@ public:
     static inline void stop(Backend backend)                            { m_sequence[backend] = 0; }
     static inline void touch(Backend backend)                           { m_sequence[backend]++; }
 
+    // touch() that leaves a stopped backend (sequence 0) stopped; safe from any thread.
+    static inline void touchRunning(Backend backend)
+    {
+        uint64_t sequence = m_sequence[backend].load();
+        while (sequence > 0 && !m_sequence[backend].compare_exchange_weak(sequence, sequence + 1)) {}
+    }
+
     static bool next(uint8_t index, uint32_t *nonce, uint32_t reserveCount, uint64_t mask);
     static void stop();
     static void touch();

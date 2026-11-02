@@ -24,7 +24,10 @@
 #include "base/io/log/Log.h"
 #include "base/io/log/Tags.h"
 #include "base/tools/Cvt.h"
+#include "base/tools/Chrono.h"
+#include "crypto/rx/RxAlgo.h"
 #include "crypto/rx/RxBasicStorage.h"
+#include "crypto/rx/RxGate.h"
 
 
 #ifdef XMRIG_FEATURE_HWLOC
@@ -50,7 +53,9 @@ xmrig::RxQueue::~RxQueue()
 
     m_thread.join();
 
-    delete m_storage;
+    for (auto &slot : m_slots) {
+        delete slot.storage;
+    }
 }
 
 
@@ -58,11 +63,15 @@ xmrig::RxDataset *xmrig::RxQueue::dataset(const Job &job, uint32_t nodeId)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (isReadyUnsafe(job)) {
-        return m_storage->dataset(job, nodeId);
+    const int index = findReady(job);
+    if (index < 0) {
+        return nullptr;
     }
 
-    return nullptr;
+    auto &slot = m_slots[index];
+    slot.used  = Chrono::steadyMSecs();
+
+    return slot.storage->dataset(job, nodeId);
 }
 
 
@@ -70,7 +79,18 @@ xmrig::HugePagesInfo xmrig::RxQueue::hugePages()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    return m_storage && m_state == STATE_IDLE ? m_storage->hugePages() : HugePagesInfo();
+    HugePagesInfo info;
+    if (m_state != STATE_IDLE) {
+        return info;
+    }
+
+    for (const auto &slot : m_slots) {
+        if (slot.storage) {
+            info += slot.storage->hugePages();
+        }
+    }
+
+    return info;
 }
 
 
@@ -87,24 +107,38 @@ void xmrig::RxQueue::enqueue(const RxSeed &seed, const std::vector<uint32_t> &no
 {
     std::unique_lock<std::mutex> lock(m_mutex);
 
-    if (!m_storage) {
+    // Ready, queued or being initialized right now.
+    for (const auto &slot : m_slots) {
+        if (slot.storage && slot.seed == seed) {
+            return;
+        }
+    }
+
+    const size_t index = chooseSlot(seed);
+    auto &slot         = m_slots[index];
+
+    if (!slot.storage) {
 #       ifdef XMRIG_FEATURE_HWLOC
         if (!nodeset.empty()) {
-            m_storage = new RxNUMAStorage(nodeset);
+            slot.storage = new RxNUMAStorage(nodeset);
         }
         else
 #       endif
         {
-            m_storage = new RxBasicStorage();
+            slot.storage = new RxBasicStorage();
         }
     }
 
-    if (m_state == STATE_PENDING && m_seed == seed) {
-        return;
+    slot.ready = false;
+    slot.seed  = seed;
+    slot.used  = Chrono::steadyMSecs();
+
+    // One request per slot: a newer seed for the same slot replaces the queued one.
+    for (auto it = m_queue.begin(); it != m_queue.end();) {
+        it = it->slot == index ? m_queue.erase(it) : it + 1;
     }
 
-    m_queue.emplace_back(seed, nodeset, threads, hugePages, oneGbPages, mode, priority);
-    m_seed  = seed;
+    m_queue.emplace_back(index, seed, nodeset, threads, hugePages, oneGbPages, mode, priority);
     m_state = STATE_PENDING;
 
     lock.unlock();
@@ -116,25 +150,65 @@ void xmrig::RxQueue::enqueue(const RxSeed &seed, const std::vector<uint32_t> &no
 template<typename T>
 bool xmrig::RxQueue::isReadyUnsafe(const T &seed) const
 {
-    return m_storage != nullptr && m_storage->isAllocated() && m_state == STATE_IDLE && m_seed == seed;
+    return findReady(seed) >= 0;
+}
+
+
+template<typename T>
+int xmrig::RxQueue::findReady(const T &seed) const
+{
+    for (size_t i = 0; i < kSlots; ++i) {
+        const auto &slot = m_slots[i];
+        if (slot.ready && slot.storage && slot.storage->isAllocated() && slot.seed == seed) {
+            return static_cast<int>(i);
+        }
+    }
+
+    return -1;
+}
+
+
+// Same variant -> the slot it already has (a new seed epoch replaces the old one), then an
+// unused slot, then the least recently used one.
+size_t xmrig::RxQueue::chooseSlot(const RxSeed &seed) const
+{
+    for (size_t i = 0; i < kSlots; ++i) {
+        if (m_slots[i].storage && m_slots[i].seed.algorithm() == seed.algorithm()) {
+            return i;
+        }
+    }
+
+    for (size_t i = 0; i < kSlots; ++i) {
+        if (!m_slots[i].storage) {
+            return i;
+        }
+    }
+
+    size_t lru = 0;
+    for (size_t i = 1; i < kSlots; ++i) {
+        if (m_slots[i].used < m_slots[lru].used) {
+            lru = i;
+        }
+    }
+
+    return lru;
 }
 
 
 void xmrig::RxQueue::backgroundInit()
 {
-    while (m_state != STATE_SHUTDOWN) {
-        std::unique_lock<std::mutex> lock(m_mutex);
+    std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_state == STATE_IDLE) {
-            m_cv.wait(lock, [this]{ return m_state != STATE_IDLE; });
+    while (true) {
+        m_cv.wait(lock, [this]{ return m_state == STATE_SHUTDOWN || !m_queue.empty(); });
+
+        if (m_state == STATE_SHUTDOWN) {
+            break;
         }
 
-        if (m_state != STATE_PENDING) {
-            continue;
-        }
-
-        const auto item = m_queue.back();
-        m_queue.clear();
+        const RxQueueItem item = m_queue.front();
+        m_queue.erase(m_queue.begin());
+        IRxStorage *storage = m_slots[item.slot].storage;
 
         lock.unlock();
 
@@ -146,18 +220,32 @@ void xmrig::RxQueue::backgroundInit()
                  Cvt::toHex(item.seed.data().data(), 8).data()
                  );
 
-        m_storage->init(item.seed, item.threads, item.hugePages, item.oneGbPages, item.mode, item.priority);
+        // The variant parameters are global: no CPU thread may hash while they change.
+        RxGate::lock();
+        RxAlgo::apply(item.seed.algorithm());
+        storage->init(item.seed, item.threads, item.hugePages, item.oneGbPages, item.mode, item.priority);
+        RxGate::unlock(item.seed.algorithm());
 
         lock.lock();
 
-        if (m_state == STATE_SHUTDOWN || !m_queue.empty()) {
-            continue;
+        if (m_state == STATE_SHUTDOWN) {
+            break;
         }
 
-        // Update seed here again in case there was more than one item in the queue
-        m_seed = item.seed;
-        m_state = STATE_IDLE;
-        m_async->send();
+        // A newer request for this slot is queued: this dataset is already outdated.
+        bool superseded = false;
+        for (const auto &queued : m_queue) {
+            superseded = superseded || queued.slot == item.slot;
+        }
+
+        if (!superseded && m_slots[item.slot].seed == item.seed) {
+            m_slots[item.slot].ready = true;
+        }
+
+        if (m_queue.empty()) {
+            m_state = STATE_IDLE;
+            m_async->send();
+        }
     }
 }
 

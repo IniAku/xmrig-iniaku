@@ -35,6 +35,7 @@ class randomx_vm;
 namespace xmrig {
 
 
+class RxDataset;
 class RxVm;
 
 
@@ -97,6 +98,7 @@ private:
 
 #   ifdef XMRIG_ALGO_RANDOMX
     randomx_vm *m_vm        = nullptr;
+    RxDataset *m_vmDataset  = nullptr;
 
     // rx/epic: salinan blob (pre_pow + nonce u64 big-endian di akhir), nonce 64-bit worker
     // & batas hash big-endian (2^256-1)/diff — Epic membandingkan hash sbg bilangan BE.

@@ -37,6 +37,7 @@
 #include "crypto/rx/Rx.h"
 #include "crypto/rx/RxCache.h"
 #include "crypto/rx/RxDataset.h"
+#include "crypto/rx/RxGate.h"
 #include "crypto/rx/RxVm.h"
 #include "crypto/ghostrider/ghostrider.h"
 #include "net/JobResults.h"
@@ -148,11 +149,16 @@ void xmrig::CpuWorker<N>::allocateRandomX_VM()
         uint8_t* scratchpad = m_memory->isHugePages() ? m_memory->scratchpad() : dataset->tryAllocateScrathpad();
         m_vm = RxVm::create(dataset, scratchpad ? scratchpad : m_memory->scratchpad(), !m_hwAES, m_assembly, node());
     }
-    else if (!dataset->get() && (m_job.currentJob().seed() != m_seed)) {
+    else if (dataset != m_vmDataset && dataset->get()) {
+        // Another dataset slot (e.g. rx/epic <-> rx/0 fallback)
+        randomx_vm_set_dataset(m_vm, dataset->get());
+    }
+    else if (!dataset->get() && (dataset != m_vmDataset || m_job.currentJob().seed() != m_seed)) {
         // Update RandomX light VM with the new seed
         randomx_vm_set_cache(m_vm, dataset->cache()->get());
     }
-    m_seed = m_job.currentJob().seed();
+    m_vmDataset = dataset;
+    m_seed      = m_job.currentJob().seed();
 }
 #endif
 
@@ -301,6 +307,18 @@ void xmrig::CpuWorker<N>::start()
 #       ifdef XMRIG_ALGO_RANDOMX
         bool first = true;
         alignas(16) uint64_t tempHash[8] = {};
+
+        // RandomX variants share global parameters: hash only while ours is applied (RxGate).
+        const bool gated = m_job.currentJob().algorithm().family() == Algorithm::RANDOM_X;
+        if (gated && !RxGate::enter(m_job.currentJob().algorithm())) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+            if (Nonce::isOutdated(Nonce::CPU, m_job.sequence()) && !Nonce::isPaused()) {
+                consumeJob();
+            }
+
+            continue;
+        }
 #       endif
 
         while (!Nonce::isOutdated(Nonce::CPU, m_job.sequence())) {
@@ -318,6 +336,11 @@ void xmrig::CpuWorker<N>::start()
 #           ifdef XMRIG_FEATURE_BENCHMARK
             if (m_benchSize) {
                 if (current_job_nonces[0] >= m_benchSize) {
+#                   ifdef XMRIG_ALGO_RANDOMX
+                    if (gated) {
+                        RxGate::leave();
+                    }
+#                   endif
                     return BenchState::done();
                 }
 
@@ -436,6 +459,12 @@ void xmrig::CpuWorker<N>::start()
                 std::this_thread::yield();
             }
         }
+
+#       ifdef XMRIG_ALGO_RANDOMX
+        if (gated) {
+            RxGate::leave();
+        }
+#       endif
 
         if (!Nonce::isPaused()) {
             consumeJob();

@@ -27,6 +27,8 @@
 #include "base/kernel/interfaces/IStrategyListener.h"
 #include "base/kernel/interfaces/ITimerListener.h"
 #include "base/tools/Object.h"
+#include "base/crypto/Algorithm.h"
+#include "base/net/stratum/Job.h"
 #include "interfaces/IJobResultListener.h"
 
 
@@ -73,6 +75,25 @@ protected:
 private:
     constexpr static int kTickInterval = 1 * 1000;
 
+    // epic.iniaku.my.id edition: the primary pool (epic.iniaku.my.id) gets the CPU whenever the
+    // Epic network is on the RandomX turn; the rest of the time the CPU mines the fallback pool.
+    // Time on other pools (fallback, or all pools when none is epic.iniaku.my.id) carries the fee.
+    enum Source {
+        SOURCE_NONE,
+        SOURCE_PRIMARY,
+        SOURCE_FALLBACK,
+        SOURCE_FEE
+    };
+
+    constexpr static uint64_t kFeePercent = 2;                                                 // = kIniakuFeePercent
+    constexpr static uint64_t kFeeSlice   = 60 * 1000;                                       // fee is mined in 1 minute slices
+    constexpr static uint64_t kFeeEvery   = kFeeSlice * (100 - kFeePercent) / kFeePercent;     // after 49 minutes on other pools
+    constexpr static uint64_t kFeeMaxOwed = 10 * kFeeSlice;
+
+    bool isOtherPoolTime() const;
+    IStrategy *strategy(Source source) const;
+    void ensureFee(const Algorithm &algorithm);
+    void select(IStrategy *changed);
     void setJob(IClient *client, const Job &job, bool donate);
     void tick();
 
@@ -81,11 +102,26 @@ private:
     void getResults(rapidjson::Value &reply, rapidjson::Document &doc, int version) const;
 #   endif
 
+    Algorithm m_feeAlgo;
+    bool m_iniaku           = false;
+    bool m_fallbackTurn     = true;
+    bool m_feeTurn          = true;
+    bool m_primaryTurn      = true;
+    bool m_waitLogged       = false;
     Controller *m_controller;
     IStrategy *m_donate     = nullptr;
+    IStrategy *m_fallback   = nullptr;
+    IStrategy *m_fee        = nullptr;
     IStrategy *m_strategy   = nullptr;
+    Job m_fallbackJob;
+    Job m_feeJob;
+    Job m_primaryJob;
     NetworkState *m_state   = nullptr;
+    Source m_source         = SOURCE_NONE;
     Timer *m_timer          = nullptr;
+    uint64_t m_feeOwed      = 0;
+    uint64_t m_lastTick     = 0;
+    uint64_t m_otherTime    = 0;
 };
 
 

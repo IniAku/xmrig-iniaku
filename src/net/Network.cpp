@@ -27,6 +27,8 @@
 #include "base/io/log/Log.h"
 #include "base/io/log/Tags.h"
 #include "base/net/stratum/Client.h"
+#include "base/net/stratum/IniakuPools.h"
+#include "base/net/stratum/Pools.h"
 #include "base/net/stratum/NetworkState.h"
 #include "base/net/stratum/SubmitResult.h"
 #include "base/tools/Chrono.h"
@@ -34,6 +36,9 @@
 #include "core/config/Config.h"
 #include "core/Controller.h"
 #include "core/Miner.h"
+#ifdef XMRIG_ALGO_RANDOMX
+#   include "crypto/rx/Rx.h"
+#endif
 #include "net/JobResult.h"
 #include "net/JobResults.h"
 #include "net/strategies/DonateStrategy.h"
@@ -71,12 +76,17 @@ xmrig::Network::Network(Controller *controller) :
 
     const Pools &pools = controller->config()->pools();
     m_strategy = pools.createStrategy(m_state);
+    m_fallback = pools.createFallbackStrategy(m_state);
+    m_iniaku   = pools.isIniaku();
 
     if (pools.donateLevel() > 0) {
         m_donate = new DonateStrategy(controller, this);
     }
 
-    m_timer = new Timer(this, kTickInterval, kTickInterval);
+    // Spread the first fee slice so that miners started together don't switch together.
+    m_otherTime = static_cast<uint64_t>(Chrono::steadyMSecs() * 7919) % kFeeEvery;
+    m_lastTick  = Chrono::steadyMSecs();
+    m_timer     = new Timer(this, kTickInterval, kTickInterval);
 }
 
 
@@ -86,6 +96,8 @@ xmrig::Network::~Network()
 
     delete m_timer;
     delete m_donate;
+    delete m_fee;
+    delete m_fallback;
     delete m_strategy;
     delete m_state;
 }
@@ -94,6 +106,10 @@ xmrig::Network::~Network()
 void xmrig::Network::connect()
 {
     m_strategy->connect();
+
+    if (m_fallback) {
+        m_fallback->connect();
+    }
 }
 
 
@@ -123,6 +139,10 @@ void xmrig::Network::onActive(IStrategy *strategy, IClient *client)
         return;
     }
 
+    if (strategy == m_fee) {
+        return;
+    }
+
     const auto &pool = client->pool();
 
 #   ifdef XMRIG_FEATURE_BENCHMARK
@@ -137,8 +157,8 @@ void xmrig::Network::onActive(IStrategy *strategy, IClient *client)
     }
 
     const char *tlsVersion = client->tlsVersion();
-    LOG_INFO("%s " WHITE_BOLD("use %s ") CYAN_BOLD("%s:%d%s ") GREEN_BOLD("%s") " " BLACK_BOLD("%s"),
-             Tags::network(), client->mode(), pool.host().data(), pool.port(), zmq_buf, tlsVersion ? tlsVersion : "", client->ip().data());
+    LOG_INFO("%s " WHITE_BOLD("use %s%s ") CYAN_BOLD("%s:%d%s ") GREEN_BOLD("%s") " " BLACK_BOLD("%s"),
+             Tags::network(), strategy == m_fallback ? "fallback " : "", client->mode(), pool.host().data(), pool.port(), zmq_buf, tlsVersion ? tlsVersion : "", client->ip().data());
 
     const char *fingerprint = client->tlsFingerprint();
     if (fingerprint != nullptr) {
@@ -154,40 +174,125 @@ void xmrig::Network::onConfigChanged(Config *config, Config *previousConfig)
     }
 
     m_strategy->stop();
+    if (m_fallback) {
+        m_fallback->stop();
+    }
+    if (m_fee) {
+        m_fee->stop();
+    }
 
     config->pools().print();
 
     delete m_strategy;
+    delete m_fallback;
+    delete m_fee;
+
+    m_fee         = nullptr;
+    m_feeAlgo     = Algorithm();
+    m_primaryJob  = Job();
+    m_fallbackJob = Job();
+    m_feeJob      = Job();
+    m_source      = SOURCE_NONE;
+
     m_strategy = config->pools().createStrategy(m_state);
+    m_fallback = config->pools().createFallbackStrategy(m_state);
+    m_iniaku   = config->pools().isIniaku();
     connect();
 }
 
 
-void xmrig::Network::onJob(IStrategy *strategy, IClient *client, const Job &job, const rapidjson::Value &)
+// Epic: the node hands out a job for the algorithm of the next block (RandomX, ProgPoW and
+// Cuckatoo take turns); a RandomX share can only become a block while that is "randomx".
+static bool isRandomXTurn(const xmrig::Job &job, const rapidjson::Value &params)
 {
-    if (m_donate && m_donate->isActive() && m_donate != strategy) {
+    if (job.algorithm() != xmrig::Algorithm::RX_EPIC || !params.IsObject()) {
+        return true;
+    }
+
+    const auto i = params.FindMember("algorithm");
+
+    return i == params.MemberEnd() || !i->value.IsString() || strcmp(i->value.GetString(), "randomx") == 0;
+}
+
+
+void xmrig::Network::onJob(IStrategy *strategy, IClient *client, const Job &job, const rapidjson::Value &params)
+{
+    if (m_donate && m_donate == strategy) {
+        return setJob(client, job, true);
+    }
+
+    if (m_donate && m_donate->isActive()) {
         return;
     }
 
-    setJob(client, job, m_donate == strategy);
+    const bool turn = isRandomXTurn(job, params);
+
+    if (strategy == m_fee) {
+        m_feeJob  = job;
+        m_feeTurn = turn;
+    }
+    else if (strategy == m_fallback) {
+        m_fallbackJob  = job;
+        m_fallbackTurn = turn;
+        ensureFee(job.algorithm());
+
+#       ifdef XMRIG_ALGO_RANDOMX
+        // Build the fallback's RandomX dataset now (second slot), so the first switch is instant.
+        if (job.algorithm().family() == Algorithm::RANDOM_X) {
+            Rx::init(job, m_controller->config()->rx(), m_controller->config()->cpu());
+        }
+#       endif
+    }
+    else {
+        m_primaryJob  = job;
+        m_primaryTurn = turn;
+
+        if (!m_iniaku) {
+            ensureFee(job.algorithm());
+        }
+    }
+
+    select(strategy);
 }
 
 
 void xmrig::Network::onJobResult(const JobResult &result)
 {
-    if (result.index == 1 && m_donate) {
-        m_donate->submit(result);
+    if (result.index == 1) {
+        if (m_fee && m_source == SOURCE_FEE) {
+            m_fee->submit(result);
+        }
+        else if (m_donate) {
+            m_donate->submit(result);
+        }
+
         return;
     }
 
-    m_strategy->submit(result);
+    if (m_fallback && result.algorithm == m_fallbackJob.algorithm() && result.clientId == m_fallbackJob.clientId()) {
+        m_fallback->submit(result);
+        return;
+    }
+
+    if (!m_fallback || result.algorithm == m_primaryJob.algorithm()) {
+        m_strategy->submit(result);
+    }
 }
 
 
-void xmrig::Network::onLogin(IStrategy *, IClient *client, rapidjson::Document &doc, rapidjson::Value &params)
+void xmrig::Network::onLogin(IStrategy *strategy, IClient *client, rapidjson::Document &doc, rapidjson::Value &params)
 {
     using namespace rapidjson;
     auto &allocator = doc.GetAllocator();
+
+    // Fee pool: only the algorithm of the other pool, so the fee needs no extra dataset/switch.
+    if (strategy == m_fee && m_feeAlgo.isValid()) {
+        Value algo(kArrayType);
+        algo.PushBack(StringRef(m_feeAlgo.name()), allocator);
+        params.AddMember("algo", algo, allocator);
+
+        return;
+    }
 
     Algorithms algorithms     = m_controller->miner()->algorithms();
     const Algorithm algorithm = client->pool().algorithm();
@@ -215,7 +320,23 @@ void xmrig::Network::onPause(IStrategy *strategy)
         m_strategy->resume();
     }
 
+    if (strategy == m_fee) {
+        m_feeJob = Job();
+        return select(strategy);
+    }
+
+    if (strategy == m_fallback) {
+        m_fallbackJob = Job();
+        return select(strategy);
+    }
+
     if (!m_strategy->isActive()) {
+        m_primaryJob = Job();
+    }
+
+    select(strategy);
+
+    if (!m_strategy->isActive() && !(m_fallback && m_fallback->isActive())) {
         LOG_ERR("%s " RED("no active pools, stop mining"), Tags::network());
 
         return m_controller->miner()->pause();
@@ -299,11 +420,151 @@ void xmrig::Network::setJob(IClient *client, const Job &job, bool donate)
 }
 
 
+bool xmrig::Network::isOtherPoolTime() const
+{
+    return m_source == SOURCE_FALLBACK || (m_source == SOURCE_PRIMARY && !m_iniaku);
+}
+
+
+xmrig::IStrategy *xmrig::Network::strategy(Source source) const
+{
+    switch (source) {
+    case SOURCE_PRIMARY:
+        return m_strategy;
+
+    case SOURCE_FALLBACK:
+        return m_fallback;
+
+    case SOURCE_FEE:
+        return m_fee;
+
+    default:
+        break;
+    }
+
+    return nullptr;
+}
+
+
+void xmrig::Network::ensureFee(const Algorithm &algorithm)
+{
+    if (!algorithm.isValid() || (m_fee && m_feeAlgo == algorithm)) {
+        return;
+    }
+
+    if (m_fee) {
+        if (m_source == SOURCE_FEE) {
+            m_source = SOURCE_NONE;
+        }
+
+        m_fee->stop();
+        delete m_fee;
+    }
+
+    m_feeAlgo = algorithm;
+    m_feeJob  = Job();
+    m_fee     = Pools::createStrategy(iniakuFeePools(algorithm), 10, 3, this);
+    m_fee->connect();
+}
+
+
+// Picks what the CPU mines: epic.iniaku.my.id on the RandomX turn, else the fee (when owed and
+// only instead of other-pool time), else the fallback pool, else nothing (wait for the turn).
+void xmrig::Network::select(IStrategy *changed)
+{
+    // Without a fallback pool keep mining epic.iniaku.my.id in every turn (behaviour of earlier
+    // releases); the turn only decides when to hand the CPU to a fallback pool.
+    const bool primaryOk  = m_strategy->isActive() && m_primaryJob.isValid() && (m_primaryTurn || (m_iniaku && !m_fallback));
+    const bool fallbackOk = m_fallback && m_fallback->isActive() && m_fallbackJob.isValid() && m_fallbackTurn;
+    const bool otherOk    = m_iniaku ? fallbackOk : primaryOk;
+    const bool feeOk      = m_feeOwed > 0 && otherOk && m_fee && m_fee->isActive() && m_feeJob.isValid() && m_feeTurn;
+
+    Source next = SOURCE_NONE;
+    if (m_iniaku && primaryOk) {
+        next = SOURCE_PRIMARY;
+    }
+    else if (feeOk) {
+        next = SOURCE_FEE;
+    }
+    else if (otherOk) {
+        next = m_iniaku ? SOURCE_FALLBACK : SOURCE_PRIMARY;
+    }
+
+    const Source prev = m_source;
+    if (next == SOURCE_NONE && prev == SOURCE_NONE && changed == m_strategy && !m_waitLogged && m_primaryJob.isValid()) {
+        m_waitLogged = true;
+        LOG_INFO("%s " YELLOW("waiting for the Epic RandomX turn%s"), Tags::network(), m_fallback ? " (fallback pool not ready)" : "");
+    }
+
+    if (next == prev && (next == SOURCE_NONE || changed != strategy(next))) {
+        return;
+    }
+
+    m_waitLogged = next == SOURCE_NONE;
+
+    m_source = next;
+
+    if (prev == SOURCE_FEE && next != SOURCE_FEE) {
+        if (m_feeOwed == 0) {
+            LOG_NOTICE("%s " WHITE_BOLD("fee finished"), Tags::network());
+        }
+        else {
+            LOG_NOTICE("%s " WHITE_BOLD("fee paused") BLACK_BOLD(" (%" PRIu64 " s left)"), Tags::network(), m_feeOwed / 1000);
+        }
+    }
+    else if (next == SOURCE_FEE && prev != SOURCE_FEE) {
+        LOG_NOTICE("%s " WHITE_BOLD("fee %" PRIu64 "%% started") BLACK_BOLD(" (%" PRIu64 " s)"), Tags::network(), kFeePercent, m_feeOwed / 1000);
+    }
+
+    if (next == SOURCE_NONE) {
+        if (m_strategy->isActive() || (m_fallback && m_fallback->isActive())) {
+            LOG_INFO("%s " YELLOW("waiting for the Epic RandomX turn%s"), Tags::network(), m_fallback ? " (fallback pool not ready)" : "");
+        }
+
+        return m_controller->miner()->pause();
+    }
+
+    if (m_iniaku && m_fallback && next != prev && prev != SOURCE_NONE && next != SOURCE_FEE && prev != SOURCE_FEE) {
+        LOG_INFO("%s " WHITE_BOLD("Epic %s turn") " -> %s", Tags::network(),
+                 next == SOURCE_PRIMARY ? "RandomX" : "ProgPoW/Cuckoo", next == SOURCE_PRIMARY ? "epic.iniaku.my.id" : "fallback pool");
+    }
+
+    IStrategy *s   = strategy(next);
+    const Job &job = next == SOURCE_PRIMARY ? m_primaryJob : (next == SOURCE_FALLBACK ? m_fallbackJob : m_feeJob);
+
+    setJob(s->client(), job, next == SOURCE_FEE);
+}
+
+
 void xmrig::Network::tick()
 {
-    const uint64_t now = Chrono::steadyMSecs();
+    const uint64_t now     = Chrono::steadyMSecs();
+    const uint64_t elapsed = now - m_lastTick;
+    m_lastTick = now;
+
+    if (isOtherPoolTime()) {
+        m_otherTime += elapsed;
+
+        while (m_otherTime >= kFeeEvery) {
+            m_otherTime -= kFeeEvery;
+            m_feeOwed    = std::min(m_feeOwed + kFeeSlice, kFeeMaxOwed);
+        }
+    }
+    else if (m_source == SOURCE_FEE) {
+        m_feeOwed = elapsed >= m_feeOwed ? 0 : m_feeOwed - elapsed;
+    }
+
+    select(nullptr);
 
     m_strategy->tick(now);
+
+    if (m_fallback) {
+        m_fallback->tick(now);
+    }
+
+    if (m_fee) {
+        m_fee->tick(now);
+    }
 
     if (m_donate) {
         m_donate->tick(now);

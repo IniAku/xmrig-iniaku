@@ -33,6 +33,9 @@
 #include "donate.h"
 
 
+#include <algorithm>
+
+
 #ifdef XMRIG_FEATURE_BENCHMARK
 #   include "base/net/stratum/benchmark/BenchConfig.h"
 #endif
@@ -63,11 +66,11 @@ xmrig::Pools::Pools() :
 
 bool xmrig::Pools::isEqual(const Pools &other) const
 {
-    if (m_data.size() != other.m_data.size() || m_retries != other.m_retries || m_retryPause != other.m_retryPause) {
+    if (m_data.size() != other.m_data.size() || m_fallback.size() != other.m_fallback.size() || m_retries != other.m_retries || m_retryPause != other.m_retryPause) {
         return false;
     }
 
-    return std::equal(m_data.begin(), m_data.end(), other.m_data.begin());
+    return std::equal(m_data.begin(), m_data.end(), other.m_data.begin()) && std::equal(m_fallback.begin(), m_fallback.end(), other.m_fallback.begin());
 }
 
 
@@ -83,16 +86,30 @@ int xmrig::Pools::donateLevel() const
 
 xmrig::IStrategy *xmrig::Pools::createStrategy(IStrategyListener *listener) const
 {
-    if (active() == 1) {
-        for (const Pool &pool : m_data) {
+    return createStrategy(m_data, retryPause(), retries(), listener);
+}
+
+
+xmrig::IStrategy *xmrig::Pools::createFallbackStrategy(IStrategyListener *listener) const
+{
+    return m_fallback.empty() ? nullptr : createStrategy(m_fallback, retryPause(), retries(), listener);
+}
+
+
+xmrig::IStrategy *xmrig::Pools::createStrategy(const std::vector<Pool> &pools, int retryPause, int retries, IStrategyListener *listener)
+{
+    const size_t enabled = static_cast<size_t>(std::count_if(pools.begin(), pools.end(), [](const Pool &pool) { return pool.isEnabled(); }));
+
+    if (enabled == 1) {
+        for (const Pool &pool : pools) {
             if (pool.isEnabled()) {
-                return new SinglePoolStrategy(pool, retryPause(), retries(), listener);
+                return new SinglePoolStrategy(pool, retryPause, retries, listener);
             }
         }
     }
 
-    auto strategy = new FailoverStrategy(retryPause(), retries(), listener);
-    for (const Pool &pool : m_data) {
+    auto strategy = new FailoverStrategy(retryPause, retries, listener);
+    for (const Pool &pool : pools) {
         if (pool.isEnabled()) {
             strategy->add(pool);
         }
@@ -110,6 +127,10 @@ rapidjson::Value xmrig::Pools::toJSON(rapidjson::Document &doc) const
     Value pools(kArrayType);
 
     for (const Pool &pool : m_data) {
+        pools.PushBack(pool.toJSON(doc), allocator);
+    }
+
+    for (const Pool &pool : m_fallback) {
         pools.PushBack(pool.toJSON(doc), allocator);
     }
 
@@ -133,6 +154,8 @@ size_t xmrig::Pools::active() const
 void xmrig::Pools::load(const IJsonReader &reader)
 {
     m_data.clear();
+    m_fallback.clear();
+    m_iniaku = false;
 
 #   ifdef XMRIG_FEATURE_BENCHMARK
     m_benchmark = std::shared_ptr<BenchConfig>(BenchConfig::create(reader.getObject(BenchConfig::kBenchmark), reader.getBool("dmi", true)));
@@ -158,7 +181,7 @@ void xmrig::Pools::load(const IJsonReader &reader)
         }
     }
 
-    applyIniakuPools(m_data, pools, reader.getString("region", "auto"));
+    m_iniaku = applyIniakuPools(m_data, m_fallback, pools, reader.getString("region", "auto"));
 
     setDonateLevel(reader.getInt(kDonateLevel, kDefaultDonateLevel));
     setProxyDonate(reader.getInt(kDonateOverProxy, PROXY_DONATE_AUTO));
@@ -184,6 +207,16 @@ void xmrig::Pools::print() const
         Log::print(GREEN_BOLD(" * ") WHITE_BOLD("POOL #%-7zu") "%s", i, pool.printableName().c_str());
 
         i++;
+    }
+
+    for (const Pool &pool : m_fallback) {
+        Log::print(GREEN_BOLD(" * ") WHITE_BOLD("FALLBACK #%-3zu") "%s", i, pool.printableName().c_str());
+
+        i++;
+    }
+
+    if (!m_data.empty() && (!m_iniaku || !m_fallback.empty())) {
+        Log::print(GREEN_BOLD(" * ") WHITE_BOLD("%-13s") "%d%% of the time on other pools, 0%% on epic.iniaku.my.id", "FEE", kIniakuFeePercent);
     }
 
 #   ifdef APP_DEBUG

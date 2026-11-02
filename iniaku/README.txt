@@ -1,9 +1,11 @@
 XMRig — epic.iniaku.my.id edition (Epic Cash RandomX)
 =====================================================
 
-XMRig 6.24 with Epic Cash RandomX ("rx/epic") and the native Epic stratum protocol.
-This build mines ONLY to the epic.iniaku.my.id pool (ID / US / AU servers, TLS port 3334).
-No developer donation.
+XMRig 6.24 with Epic Cash RandomX ("rx/epic") and the native Epic stratum protocol, for the
+epic.iniaku.my.id pool (ID / US / AU servers, TLS port 3334).
+
+Mining on epic.iniaku.my.id: 0% fee.
+Mining on any other pool (a fallback pool, or other pools only): 2% fee, see "Fee" below.
 
 Quick start
 -----------
@@ -32,7 +34,34 @@ Region
 "region": "auto" (default) measures the connection time to id / us / au and uses the
 closest server; if it goes down XMRig switches to the next one automatically.
 Force a region in config.json ("region": "us") or on the command line: --region us
-Valid values: auto, id, us, au. Pool URLs given with -o or in config.json are ignored.
+Valid values: auto, id, us, au.
+
+Fallback pool: no idle time between Epic RandomX turns
+------------------------------------------------------
+Epic takes turns per block: RandomX, ProgPoW, RandomX, ProgPoW, ... and Cuckoo every 25th
+block, each turn about one minute, and only the RandomX turn can produce a RandomX block.
+Add a second pool and the CPU mines it during the ProgPoW/Cuckoo turns, switching back to
+epic.iniaku.my.id the moment the RandomX turn starts:
+
+    "pools": [
+        { "user": "<your Epic address>.<worker>", "pass": "x" },
+        { "url": "xmr-eu1.nanopool.org:14433", "user": "<your XMR address>", "algo": "rx/0", "tls": true }
+    ]
+
+- The first entry without "url" (or with an *.epic.iniaku.my.id url) is epic.iniaku.my.id;
+  every pool with another url is a fallback pool (several = failover, in order).
+- Any CPU algorithm XMRig supports works ("algo": "rx/0", "rx/wow", "gr", "cn/r", ...).
+  Set "algo" (or "coin") so the miner knows it before the first job.
+- Two RandomX datasets stay in memory (rx/epic + the fallback's): about 4.6 GB RAM instead of
+  2.3 GB, so switching is instant. With huge pages set vm.nr_hugepages=2600 for both.
+- Without an epic.iniaku.my.id entry the miner works like a normal XMRig on your pools.
+
+Fee
+---
+Time spent on epic.iniaku.my.id is always free. Time spent on other pools carries a 2% fee:
+after 49 minutes on other pools the miner mines 1 minute for the fee, with the same algorithm
+(rx/epic -> epic.iniaku.my.id, anything else -> MoneroOcean, paid in XMR), and never during
+an Epic RandomX turn. The log shows "fee 2% started" / "fee finished".
 
 Faster mining: huge pages (administrator / root)
 -----------------------------------------------
@@ -47,10 +76,11 @@ The miner also works without them, just slower ("huge pages 0%" in the log).
 
 Notes
 -----
-- Epic rotates the algorithm per block (ProgPoW / RandomX / Cuckoo). This miner keeps
-  mining RandomX all the time; the pool accepts RandomX shares in every turn.
-- About 2.3 GB RAM is used for the RandomX dataset ("fast" mode). On machines with
-  little RAM set "mode": "light" in the "randomx" section (much slower).
+- Epic rotates the algorithm per block (ProgPoW / RandomX / Cuckoo). Without a fallback pool
+  the miner keeps mining RandomX on epic.iniaku.my.id in every turn.
+- About 2.3 GB RAM is used for the RandomX dataset ("fast" mode), 4.6 GB with a RandomX
+  fallback pool. On machines with little RAM set "mode": "light" in the "randomx" section
+  (much slower).
 - Keys while running: h = hashrate, p = pause, r = resume, s = results, c = connection.
 
 Source & releases: https://github.com/IniAku/xmrig-iniaku

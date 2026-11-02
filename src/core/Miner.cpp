@@ -59,6 +59,7 @@
 #   include "crypto/rx/Profiler.h"
 #   include "crypto/rx/Rx.h"
 #   include "crypto/rx/RxConfig.h"
+#   include "crypto/rx/RxGate.h"
 #endif
 
 
@@ -606,6 +607,14 @@ void xmrig::Miner::setJob(const Job &job, bool donate)
 
     mutex.unlock();
 
+#   ifdef XMRIG_ALGO_RANDOMX
+    // Two datasets in memory: switch the global RandomX variant before the threads hash. Fails
+    // only while a dataset is being initialized; onDatasetReady() applies it afterwards.
+    if (ready && job.algorithm().family() == Algorithm::RANDOM_X) {
+        RxGate::apply(job.algorithm());
+    }
+#   endif
+
     d_ptr->active = true;
     d_ptr->m_taskbar.setActive(true);
 
@@ -744,9 +753,12 @@ void xmrig::Miner::onRequest(IApiRequest &request)
 #ifdef XMRIG_ALGO_RANDOMX
 void xmrig::Miner::onDatasetReady()
 {
-    if (!Rx::isReady(job())) {
+    const Job current = job();
+    if (!Rx::isReady(current)) {
         return;
     }
+
+    RxGate::apply(current.algorithm());
 
     d_ptr->handleJobChange();
 }
