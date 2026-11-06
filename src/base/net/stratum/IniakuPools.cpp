@@ -58,6 +58,7 @@ static const IniakuServer kServers[] = {
     { "id", "id.epic.iniaku.my.id" },
     { "us", "us.epic.iniaku.my.id" },
     { "au", "au.epic.iniaku.my.id" },
+    { "eu", "eu.epic.iniaku.my.id" },
 };
 
 static constexpr uint16_t kPort       = 3334; // stratum TLS
@@ -216,7 +217,7 @@ bool applyIniakuPools(std::vector<Pool> &pools, std::vector<Pool> &fallback, con
     }
 
     if (!region || !isIniakuRegion(region)) {
-        LOG_ERR("unknown region \"%s\", using auto (valid: auto, id, us, au)", region ? region : "");
+        LOG_ERR("unknown region \"%s\", using auto (valid: auto, id, us, au, eu)", region ? region : "");
         region = "auto";
     }
 
