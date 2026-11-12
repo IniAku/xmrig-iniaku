@@ -77,7 +77,9 @@ The miner also works without them, just slower ("huge pages 0%" in the log).
 Notes
 -----
 - Epic rotates the algorithm per block (ProgPoW / RandomX / Cuckoo). Without a fallback pool
-  the miner keeps mining RandomX on epic.iniaku.my.id in every turn.
+  the miner pauses during the ProgPoW/Cuckoo turns ("waiting for the Epic RandomX turn") and
+  resumes when the RandomX turn starts, so the CPU does not burn power on work that cannot
+  become a RandomX block.
 - About 2.3 GB RAM is used for the RandomX dataset ("fast" mode), 4.6 GB with a RandomX
   fallback pool. On machines with little RAM set "mode": "light" in the "randomx" section
   (much slower).

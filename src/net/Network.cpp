@@ -472,9 +472,9 @@ void xmrig::Network::ensureFee(const Algorithm &algorithm)
 // only instead of other-pool time), else the fallback pool, else nothing (wait for the turn).
 void xmrig::Network::select(IStrategy *changed)
 {
-    // Without a fallback pool keep mining epic.iniaku.my.id in every turn (behaviour of earlier
-    // releases); the turn only decides when to hand the CPU to a fallback pool.
-    const bool primaryOk  = m_strategy->isActive() && m_primaryJob.isValid() && (m_primaryTurn || (m_iniaku && !m_fallback));
+    // epic.iniaku.my.id only gets the CPU during the Epic RandomX turn. Outside it the CPU mines
+    // the fallback pool, or pauses when there is none (saves power: no RandomX block possible).
+    const bool primaryOk  = m_strategy->isActive() && m_primaryJob.isValid() && m_primaryTurn;
     const bool fallbackOk = m_fallback && m_fallback->isActive() && m_fallbackJob.isValid() && m_fallbackTurn;
     const bool otherOk    = m_iniaku ? fallbackOk : primaryOk;
     const bool feeOk      = m_feeOwed > 0 && otherOk && m_fee && m_fee->isActive() && m_feeJob.isValid() && m_feeTurn;
