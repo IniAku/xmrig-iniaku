@@ -5,7 +5,7 @@ XMRig 6.24 with Epic Cash RandomX ("rx/epic") and the native Epic stratum protoc
 epic.iniaku.my.id pool (ID / US / AU servers, TLS port 3334).
 
 Mining on epic.iniaku.my.id: 0% fee.
-Mining on any other pool (a fallback pool, or other pools only): 2% fee, see "Fee" below.
+Mining on any other pool (a fallback pool, or other pools only): 1% fee, see "Fee" below.
 
 Quick start
 -----------
@@ -58,10 +58,10 @@ epic.iniaku.my.id the moment the RandomX turn starts:
 
 Fee
 ---
-Time spent on epic.iniaku.my.id is always free. Time spent on other pools carries a 2% fee:
-after 49 minutes on other pools the miner mines 1 minute for the fee, with the same algorithm
+Time spent on epic.iniaku.my.id is always free. Time spent on other pools carries a 1% fee:
+after 99 minutes on other pools the miner mines 1 minute for the fee, with the same algorithm
 (rx/epic -> epic.iniaku.my.id, anything else -> MoneroOcean, paid in XMR), and never during
-an Epic RandomX turn. The log shows "fee 2% started" / "fee finished".
+an Epic RandomX turn. The log shows "fee 1% started" / "fee finished".
 
 Faster mining: huge pages (administrator / root)
 -----------------------------------------------

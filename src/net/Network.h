@@ -85,9 +85,9 @@ private:
         SOURCE_FEE
     };
 
-    constexpr static uint64_t kFeePercent = 2;                                                 // = kIniakuFeePercent
+    constexpr static uint64_t kFeePercent = 1;                                                 // = kIniakuFeePercent
     constexpr static uint64_t kFeeSlice   = 60 * 1000;                                       // fee is mined in 1 minute slices
-    constexpr static uint64_t kFeeEvery   = kFeeSlice * (100 - kFeePercent) / kFeePercent;     // after 49 minutes on other pools
+    constexpr static uint64_t kFeeEvery   = kFeeSlice * (100 - kFeePercent) / kFeePercent;     // after 99 minutes on other pools
     constexpr static uint64_t kFeeMaxOwed = 10 * kFeeSlice;
 
     bool isOtherPoolTime() const;

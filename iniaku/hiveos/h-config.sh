@@ -7,7 +7,7 @@
 #                        region's hostname is pointed at that IP in /etc/hosts (TLS still
 #                        matches). Needs a regional Pool URL (id./us./au.epic.iniaku.my.id).
 #     fallback=host:port fallback pool, mined while the Epic network is not on the RandomX
-#                        turn (2% fee on that time), with
+#                        turn (1% fee on that time), with
 #     fallback-user=...  wallet/login for it (required), fallback-pass=x,
 #     fallback-algo=rx/0 (default rx/0), fallback-tls=1 (TLS on/off, default 1)
 

@@ -23,7 +23,7 @@ fallback=xmr-eu1.nanopool.org:14433 fallback-user=<your XMR address> fallback-al
 ```
 
 `fallback-pass=` and `fallback-tls=0|1` (default 1) are optional. Time on the fallback pool
-carries a 2% fee; time on epic.iniaku.my.id is always 0%.
+carries a 1% fee; time on epic.iniaku.my.id is always 0%.
 
 - Stats come from the xmrig HTTP API on 127.0.0.1:60060.
 - HiveOS runs miners as root, so xmrig sets up huge pages itself.

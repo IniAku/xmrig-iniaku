@@ -33,7 +33,7 @@ class Pool;
 
 
 // Fee for mining on pools other than epic.iniaku.my.id (0% on epic.iniaku.my.id).
-constexpr const int kIniakuFeePercent = 2;
+constexpr const int kIniakuFeePercent = 1;
 
 
 bool isIniakuHost(const char *host);
