@@ -22,7 +22,7 @@
 #define APP_ID        "xmrig"
 #define APP_NAME      "XMRig"
 #define APP_DESC      "XMRig miner (epic.iniaku.my.id edition, Epic Cash RandomX)"
-#define APP_VERSION   "6.24.0-iniaku.4"
+#define APP_VERSION   "6.24.0-iniaku.5"
 #define APP_DOMAIN    "xmrig.com"
 #define APP_SITE      "www.xmrig.com"
 #define APP_COPYRIGHT "Copyright (C) 2016-2025 xmrig.com"

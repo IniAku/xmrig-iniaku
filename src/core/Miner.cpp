@@ -74,6 +74,9 @@ namespace xmrig {
 static std::mutex mutex;
 
 
+static constexpr uint64_t kStallRestartMs = 120000;
+
+
 class MinerPrivate
 {
 public:
@@ -382,6 +385,7 @@ public:
     String userJobId;
     Timer *timer        = nullptr;
     uint64_t ticks      = 0;
+    uint64_t stallMs    = 0;   // see the watchdog in Miner::onTimer
 
     Taskbar m_taskbar;
 };
@@ -676,6 +680,36 @@ void xmrig::Miner::onTimer(const Timer *)
     }
 
     d_ptr->maxHashrate[d_ptr->algorithm] = std::max(d_ptr->maxHashrate[d_ptr->algorithm], maxHashrate);
+
+#   ifdef XMRIG_ALGO_RANDOMX
+    // Watchdog (iniaku): users saw the CPU at 0 H/s for hours while jobs kept arriving during the
+    // Epic RandomX turn, until a manual restart. Count the time the miner should be hashing (not
+    // paused between turns, job valid, RandomX dataset ready) with a 10 s hashrate of 0; at 120 s
+    // log the state for diagnosis and restart the CPU threads (the dataset is kept).
+    {
+        // RandomX (CPU) only: GPU algorithms can legitimately sit at 0 H/s for a long time
+        // (DAG generation), and restarting would only start that again.
+        const bool ready = d_ptr->job.isValid() && d_ptr->job.algorithm().family() == Algorithm::RANDOM_X && Rx::isReady(d_ptr->job);
+
+        if (!d_ptr->active || !d_ptr->enabled || !ready || maxHashrate > 0.0) {
+            if (maxHashrate > 0.0) {
+                d_ptr->stallMs = 0;
+            }
+        }
+        else if ((d_ptr->stallMs += 500) >= kStallRestartMs) {
+            d_ptr->stallMs = 0;
+            const Job job  = d_ptr->job;
+
+            const char *gate = RxGate::applied() == job.algorithm().id() ? "ok" : Algorithm(RxGate::applied()).name();
+            LOG_WARN("%s " YELLOW_BOLD("no hashes for %u s while mining %s height %" PRIu64 " (nonce paused %d, rx gate %s), restarting CPU threads"),
+                     Tags::miner(), static_cast<unsigned>(kStallRestartMs / 1000), job.algorithm().name(), job.height(),
+                     Nonce::isPaused() ? 1 : 0, gate ? gate : "none");
+
+            stop();
+            setJob(job, job.index() == 1);
+        }
+    }
+#   endif
 
     const auto printTime = config->printTime();
     if (printTime && d_ptr->ticks && (d_ptr->ticks % (printTime * 2)) == 0) {
